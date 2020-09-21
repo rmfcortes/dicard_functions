@@ -8,7 +8,6 @@ admin.initializeApp()
 const conekta = require('conekta')
 const cors = require('cors')({origin: true})
 
-conekta.api_key = 'key_J1cLBV6qz5G5PsGBKP8yKQ'
 conekta.api_version = '2.0.0'
 conekta.locale = 'es'
 
@@ -17,24 +16,43 @@ exports.request = functions.https.onRequest((request, response) => {
         response.set('Access-Control-Allow-Origin', '*')
         response.set('Access-Control-Allow-Credentials', 'true')
         console.log(request.body);
-        const data = request.body.data
-        if (request.body.origen === 'newCard') {
-            return newCard(data)
-            .then(client => response.status(200).send(client))
-            .catch(err => response.status(400).send('No pudimos completar el registro ' + err))
-        } else if (request.body.origen === 'cargo') {
-            return doCharge(data.order, data.idConekta)
-            .then(() => response.status(200).send('Cargo autorizado'))
-            .catch((err: any) => response.status(400).send('No pudimos hacer el cargo ' + err))
-        } else {
+        if (!request.body.origen) {
             const subdominio = request.path
             const manifestVal = await admin.database().ref(`manifest/${subdominio}`).once('value')
             const manifest = manifestVal ? manifestVal.val() : null
             if (manifest) return response.status(200).send(manifest)
             else return response.status(400).send(null)
         }
+        
+        const data = request.body.data
+        const key = await getKey(data.id, 'secret')
+        console.log(key);
+        conekta.api_key = key
+        if (request.body.origen === 'newCard') {
+            return newCard(data.client)
+            .then(client => response.status(200).send(client))
+            .catch(err => response.status(400).send('No pudimos completar el registro ' + err))
+        } else if (request.body.origen === 'cargo') {
+            return doCharge(data.order, data.idConekta)
+            .then(() => response.status(200).send('Cargo autorizado'))
+            .catch((err: any) => response.status(400).send('No pudimos hacer el cargo ' + err))
+        } else if (request.body.origen === 'key') {
+            return getKey(data.id, 'public')
+            .then(id => response.status(200).send(id))
+            .catch((err: any) => response.status(400).send(err))
+        }
+        return null
     })
 })
+
+function getKey(idHost: string, type: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      return admin.database().ref(`id_conek/${idHost}/${type}`).once('value')
+      .then((res: any) => res ? res.val() : '')
+      .then(key => resolve(key))
+      .catch(err => reject(err))
+    })
+}
 
 function newCard(client: ClientToken) {
     if (!client.idConekta) return createUser(client)
@@ -92,7 +110,6 @@ function doCharge(order: Order, idConekta: string) {
     return new Promise((resolve, reject) => {        
         conekta.Customer.find(idConekta)
         .then((cliente: any) => {
-            console.log(order.payment.id);
             cliente.update({
                 default_payment_source_id: order.payment.id
             },
@@ -100,13 +117,13 @@ function doCharge(order: Order, idConekta: string) {
                 if (err) {
                     console.log(err);
                     reject(err)
+                    return
                 }
-                console.log(customer.toObject());
                 for (const producto of order.products) {
                     const item: Item = {
                         id: producto.id,
                         name: producto.name,
-                        unit_price: Math.round((producto.total + Number.EPSILON) * 100) / 100,
+                        unit_price: Math.round(producto.total + Number.EPSILON) * 100,
                         quantity: 1
                     }
                     items.push(item)
@@ -115,7 +132,7 @@ function doCharge(order: Order, idConekta: string) {
                     const tip: Item =  {
                         id: 'tip',
                         name: 'tip',
-                        unit_price: Math.round((order.tip + Number.EPSILON) * 100) / 100,
+                        unit_price: Math.round(order.tip + Number.EPSILON) * 100,
                         quantity: 1
                     }
                     items.push(tip)
@@ -124,7 +141,7 @@ function doCharge(order: Order, idConekta: string) {
                     const comision: Item =  {
                         id: 'comision',
                         name: 'comision',
-                        unit_price: Math.round((order.comision + Number.EPSILON) * 100) / 100,
+                        unit_price: Math.round(order.comision + Number.EPSILON) * 100,
                         quantity: 1
                     }
                     items.push(comision)
@@ -133,7 +150,7 @@ function doCharge(order: Order, idConekta: string) {
                     const deliver: Item =  {
                         id: 'deliver',
                         name: 'deliver',
-                        unit_price: Math.round((order.delivery_cost + Number.EPSILON) * 100) / 100,
+                        unit_price: Math.round(order.delivery_cost + Number.EPSILON) * 100,
                         quantity: 1
                     }
                     items.push(deliver)
