@@ -11,11 +11,12 @@ const cors = require('cors')({origin: true})
 conekta.api_version = '2.0.0'
 conekta.locale = 'es'
 
+const nodemailer = require('nodemailer')
+
 exports.request = functions.https.onRequest((request, response) => {
     cors(request, response, async () => {
         response.set('Access-Control-Allow-Origin', '*')
         response.set('Access-Control-Allow-Credentials', 'true')
-        console.log(request.body);
         if (!request.body.origen) {
             const subdominio = request.path
             const manifestVal = await admin.database().ref(`manifest/${subdominio}`).once('value')
@@ -26,7 +27,6 @@ exports.request = functions.https.onRequest((request, response) => {
         
         const data = request.body.data
         const key = await getKey(data.id, 'secret')
-        console.log(key);
         conekta.api_key = key
         if (request.body.origen === 'newCard') {
             return newCard(data.client)
@@ -38,6 +38,10 @@ exports.request = functions.https.onRequest((request, response) => {
             .catch((err: any) => response.status(400).send('No pudimos hacer el cargo ' + err))
         } else if (request.body.origen === 'key') {
             return getKey(data.id, 'public')
+            .then(id => response.status(200).send(id))
+            .catch((err: any) => response.status(400).send(err))
+        } else if (request.body.origen === 'email') {
+            return sendEmail(data)
             .then(id => response.status(200).send(id))
             .catch((err: any) => response.status(400).send(err))
         }
@@ -182,6 +186,38 @@ function doCharge(order: Order, idConekta: string) {
                 })
             })
         })
+    })
+}
+
+function sendEmail(data: any): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            secure: false,
+            port: 25,
+            auth: {
+                user: 'dicardgdl@gmail.com',
+                pass: '9mJE6bcLs3FDqPh'
+            },
+            tls: {
+                rejectUnauthorized: false
+            }
+        })
+        // const dest = data.dest
+        const mailOptions = {
+            from: 'Dicard <dicardgdl@gmail.com>', // Something like: Jane Doe <janedoe@gmail.com>
+            to: 'rmfcortes@msn.com, ' + data.dest,
+            subject: 'Nueva consulta', // email subject
+            html: `
+            <p style="font-size: 16px;"><strong>Consulta de:</strong>${data.name}</p>
+            <p style="font-size: 16px;"><strong>Teléfono:</strong>${data.phone}</p>
+            <p style="font-size: 16px;"><strong>Correo:</strong>${data.email}</p>
+            <hr>
+            <p style="font-size: 16px;">${data.text}</p>
+                <br />
+            ` // email content in HTML
+        }
+        return transporter.sendMail(mailOptions, (erro: any, info: any) => erro ? reject(erro.toString()) : resolve('Sended'))
     })
 }
 
